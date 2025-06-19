@@ -101,6 +101,65 @@
     z-index: 5;
 }
 
+/* ===== MULTI-COUNTRY PHONE INPUT STYLES ===== */
+.cod-phone-input-group {
+    display: flex !important;
+    gap: 8px !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+}
+
+.cod-country-select {
+    min-width: 100px !important;
+    padding: 10px 8px !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 6px !important;
+    font-size: 14px !important;
+    background: white !important;
+    cursor: pointer !important;
+    transition: border-color 0.2s !important;
+}
+
+.cod-country-select:focus {
+    outline: none !important;
+    border-color: #667eea !important;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+}
+
+.cod-phone-input {
+    flex: 1 !important;
+    min-width: 150px !important;
+}
+
+.cod-send-otp-btn {
+    white-space: nowrap !important;
+    min-width: 100px !important;
+}
+
+.cod-phone-help {
+    margin-top: 6px !important;
+    width: 100% !important;
+}
+
+.cod-phone-help small {
+    color: #6b7280 !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+}
+
+/* Timer and disabled button styles */
+.cod-btn-timer-active {
+    background-color: #e5e7eb !important;
+    color: #6b7280 !important;
+    cursor: not-allowed !important;
+    opacity: 0.7 !important;
+}
+
+.cod-btn-timer-active:hover {
+    background-color: #e5e7eb !important;
+    color: #6b7280 !important;
+}
+
 /* ===== EXISTING STYLES CONTINUE ===== */
 
 .cod-verifier-container {
@@ -444,6 +503,28 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+    .cod-phone-input-group {
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+    
+    .cod-country-select {
+        min-width: auto !important;
+        width: 100% !important;
+        margin-bottom: 8px !important;
+    }
+    
+    .cod-phone-input {
+        min-width: auto !important;
+        width: 100% !important;
+        margin-bottom: 8px !important;
+    }
+    
+    .cod-send-otp-btn {
+        min-width: auto !important;
+        width: 100% !important;
+    }
+    
     .cod-input-group {
         flex-direction: column;
     }
@@ -485,10 +566,4 @@
     width: 100% !important;
     margin: 20px 0 30px 0 !important;
     display: block !important;
-}
-
-/* Style for the button when the timer is active */
-.cod-btn-timer-active {
-    background-color: lightgray !important;
-    color: black !important;
 }

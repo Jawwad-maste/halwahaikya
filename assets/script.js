@@ -1,7 +1,7 @@
 jQuery(document).ready(function($) {
     'use strict';
     
-    console.log('COD Verifier: Script initialized');
+    console.log('COD Verifier: Multi-country script initialized');
     
     // Check if codVerifier is defined
     if (typeof codVerifier === 'undefined') {
@@ -9,16 +9,138 @@ jQuery(document).ready(function($) {
         return;
     }
     
+    // Get settings from global variable
+    const settings = window.codVerifierSettings || {
+        allowedRegions: 'india',
+        otpTimerDuration: 30,
+        testMode: '1'
+    };
+    
     // Global verification state
     window.codVerifierStatus = {
       otpVerified: false,
       tokenVerified: false
     };
+    
     let isBlockCheckout = $('.wc-block-checkout').length > 0;
     let verificationBoxCreated = false;
     let warningMessageCreated = false;
+    let otpTimer = null;
     
     console.log('COD Verifier: Checkout type:', isBlockCheckout ? 'Blocks' : 'Classic');
+    console.log('COD Verifier: Settings:', settings);
+    
+    // ===== MULTI-COUNTRY PHONE VALIDATION =====
+    
+    const phoneValidationRules = {
+        '+91': {
+            name: 'India',
+            pattern: /^[6-9]\d{9}$/,
+            placeholder: 'Enter 10-digit number (e.g., 7039940998)',
+            length: 10
+        },
+        '+1': {
+            name: 'USA',
+            pattern: /^[2-9]\d{9}$/,
+            placeholder: 'Enter 10-digit number (e.g., 2125551234)',
+            length: 10
+        },
+        '+44': {
+            name: 'UK',
+            pattern: /^7\d{9}$/,
+            placeholder: 'Enter 10-digit number (e.g., 7700900123)',
+            length: 10
+        }
+    };
+    
+    function validatePhoneNumber(countryCode, phoneNumber) {
+        const rule = phoneValidationRules[countryCode];
+        if (!rule) {
+            return { valid: false, message: 'Unsupported country code' };
+        }
+        
+        if (!phoneNumber || phoneNumber.length !== rule.length) {
+            return { valid: false, message: `Please enter a ${rule.length}-digit ${rule.name} phone number` };
+        }
+        
+        if (!rule.pattern.test(phoneNumber)) {
+            return { valid: false, message: `Please enter a valid ${rule.name} phone number` };
+        }
+        
+        return { valid: true, message: 'Valid phone number' };
+    }
+    
+    function updatePhoneHelperText() {
+        const countryCode = $('#cod_country_code').val();
+        const rule = phoneValidationRules[countryCode];
+        if (rule) {
+            $('#cod_phone_help_text').text(rule.placeholder);
+            $('#cod_phone').attr('placeholder', rule.placeholder.split('(e.g., ')[0].trim());
+        }
+    }
+    
+    // ===== OTP TIMER FUNCTIONALITY =====
+    
+    function startOTPTimer(duration) {
+        const $btn = $('#cod_send_otp');
+        let timeLeft = duration;
+        
+        // Disable button and change appearance
+        $btn.prop('disabled', true)
+            .addClass('cod-btn-timer-active')
+            .removeClass('cod-btn-primary');
+        
+        // Update button text immediately
+        updateTimerDisplay(timeLeft, $btn);
+        
+        // Start countdown
+        otpTimer = setInterval(() => {
+            timeLeft--;
+            updateTimerDisplay(timeLeft, $btn);
+            
+            if (timeLeft <= 0) {
+                clearInterval(otpTimer);
+                otpTimer = null;
+                
+                // Re-enable button and restore appearance
+                $btn.prop('disabled', false)
+                    .removeClass('cod-btn-timer-active')
+                    .addClass('cod-btn-primary')
+                    .text('Send OTP');
+                
+                console.log('COD Verifier: OTP timer completed');
+            }
+        }, 1000);
+        
+        console.log('COD Verifier: OTP timer started for', duration, 'seconds');
+    }
+    
+    function updateTimerDisplay(timeLeft, $btn) {
+        if (timeLeft > 0) {
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            const displayTime = seconds < 10 ? `0${seconds}` : seconds;
+            
+            if (minutes > 0) {
+                $btn.text(`Resend in ${minutes}:${displayTime}`);
+            } else {
+                $btn.text(`Resend in ${seconds}s`);
+            }
+        }
+    }
+    
+    function clearOTPTimer() {
+        if (otpTimer) {
+            clearInterval(otpTimer);
+            otpTimer = null;
+            
+            const $btn = $('#cod_send_otp');
+            $btn.prop('disabled', false)
+                .removeClass('cod-btn-timer-active')
+                .addClass('cod-btn-primary')
+                .text('Send OTP');
+        }
+    }
     
     // ===== FLOATING POPUP NOTIFICATION SYSTEM =====
     
@@ -134,12 +256,6 @@ jQuery(document).ready(function($) {
                     background: #f3f4f6;
                 }
                 
-                .cod-popup-close:focus {
-                    outline: 2px solid #667eea;
-                    outline-offset: 2px;
-                }
-                
-                /* Mobile responsive */
                 @media (max-width: 480px) {
                     .cod-floating-popup {
                         top: 10px;
@@ -147,78 +263,6 @@ jQuery(document).ready(function($) {
                         left: 10px;
                         max-width: none;
                         min-width: auto;
-                    }
-                    
-                    .cod-popup-container {
-                        padding: 14px;
-                        gap: 10px;
-                    }
-                    
-                    .cod-popup-icon {
-                        width: 36px;
-                        height: 36px;
-                    }
-                    
-                    .cod-popup-title {
-                        font-size: 13px;
-                    }
-                    
-                    .cod-popup-message {
-                        font-size: 12px;
-                    }
-                }
-                
-                /* Dark mode support */
-                @media (prefers-color-scheme: dark) {
-                    .cod-popup-container {
-                        background: #1f2937;
-                        border-color: #374151;
-                        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.1);
-                    }
-                    
-                    .cod-popup-title {
-                        color: #f9fafb;
-                    }
-                    
-                    .cod-popup-message {
-                        color: #d1d5db;
-                    }
-                    
-                    .cod-popup-close {
-                        color: #9ca3af;
-                    }
-                    
-                    .cod-popup-close:hover {
-                        color: #d1d5db;
-                        background: #374151;
-                    }
-                }
-                
-                /* High contrast mode */
-                @media (prefers-contrast: high) {
-                    .cod-popup-container {
-                        border-width: 2px;
-                        border-color: #000000;
-                    }
-                    
-                    .cod-popup-title {
-                        color: #000000;
-                        font-weight: 700;
-                    }
-                    
-                    .cod-popup-close {
-                        border: 1px solid #000000;
-                    }
-                }
-                
-                /* Reduced motion */
-                @media (prefers-reduced-motion: reduce) {
-                    .cod-popup-container {
-                        transition: opacity 0.2s ease;
-                    }
-                    
-                    .cod-floating-popup.show .cod-popup-container {
-                        transform: none;
                     }
                 }
             </style>
@@ -228,13 +272,8 @@ jQuery(document).ready(function($) {
     }
     
     function showFloatingMessage(message, title = 'Verification Required') {
-        // Inject styles if not already present
         injectFloatingPopupStyles();
-        
-        // Remove existing popup if present
         $('#cod-floating-popup').remove();
-        
-        // Create and inject popup HTML
         $('body').append(createFloatingPopupHTML());
         
         const $popup = $('#cod-floating-popup');
@@ -242,24 +281,14 @@ jQuery(document).ready(function($) {
         const $titleEl = $popup.find('.cod-popup-title');
         const $closeBtn = $popup.find('.cod-popup-close');
         
-        // Set content
         $titleEl.text(title);
         $messageEl.text(message);
         
-        // Show popup with animation
         $popup.show();
+        setTimeout(() => $popup.addClass('show'), 10);
         
-        // Trigger animation after a small delay to ensure DOM is ready
-        setTimeout(() => {
-            $popup.addClass('show');
-        }, 10);
+        const autoHideTimer = setTimeout(() => hideFloatingMessage(), 5000);
         
-        // Auto-hide after 5 seconds
-        const autoHideTimer = setTimeout(() => {
-            hideFloatingMessage();
-        }, 5000);
-        
-        // Close button handler
         $closeBtn.off('click').on('click', function(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -267,9 +296,7 @@ jQuery(document).ready(function($) {
             hideFloatingMessage();
         });
         
-        // Store timer reference for potential cleanup
         $popup.data('autoHideTimer', autoHideTimer);
-        
         console.log('COD Verifier: Floating message shown:', message);
     }
     
@@ -277,50 +304,37 @@ jQuery(document).ready(function($) {
         const $popup = $('#cod-floating-popup');
         if ($popup.length === 0) return;
         
-        // Clear any existing timer
         const timer = $popup.data('autoHideTimer');
-        if (timer) {
-            clearTimeout(timer);
-        }
+        if (timer) clearTimeout(timer);
         
-        // Remove show class to trigger fade-out animation
         $popup.removeClass('show');
-        
-        // Remove from DOM after animation completes
-        setTimeout(() => {
-            $popup.remove();
-        }, 300);
-        
+        setTimeout(() => $popup.remove(), 300);
         console.log('COD Verifier: Floating message hidden');
     }
     
     // ===== UTILITY FUNCTIONS =====
     
-    // Function to get selected payment method (primarily for showing/hiding the box)
     function getSelectedPaymentMethod() {
         let selectedMethod = null;
-    
-        // Combined and prioritized selectors for both Block and Classic checkout
+        
         const selectors = [
-            'input#radio-control-wc-payment-method-options-cod:checked', // Specific Block Checkout selector you found
-            'input[name="payment_method"]:checked', // Standard classic checkout selector
-            '.wc-block-components-radio-control__input:checked', // Common block checkout radio input
-            'input[name*="radio-control-wc-payment-method"]:checked', // Partial name match for block checkout
-            'input[name*="payment-method"]:checked', // Broader partial name match
-            'input.wc-payment-method-input:checked' // Common WooCommerce class
+            'input#radio-control-wc-payment-method-options-cod:checked',
+            'input[name="payment_method"]:checked',
+            '.wc-block-components-radio-control__input:checked',
+            'input[name*="radio-control-wc-payment-method"]:checked',
+            'input[name*="payment-method"]:checked',
+            'input.wc-payment-method-input:checked'
         ];
-    
+        
         for (let selector of selectors) {
             const $input = $(selector);
             if ($input.length > 0) {
                 selectedMethod = $input.val();
-                if (selectedMethod) { // Ensure we got a non-empty value string
-                     break;
-                }
+                if (selectedMethod) break;
             }
         }
-    
-        console.log('COD Verifier: Selected payment method (for box visibility):', selectedMethod);
+        
+        console.log('COD Verifier: Selected payment method:', selectedMethod);
         return selectedMethod;
     }
     
@@ -338,7 +352,6 @@ jQuery(document).ready(function($) {
         const $clonedBox = $template.clone();
         $clonedBox.attr('id', 'cod-verifier-wrapper-active');
         
-        // Find insertion point BEFORE the actions container
         let $insertionPoint = null;
         
         if (isBlockCheckout) {
@@ -374,6 +387,10 @@ jQuery(document).ready(function($) {
         if ($insertionPoint && $insertionPoint.length > 0) {
             $insertionPoint.before($clonedBox);
             verificationBoxCreated = true;
+            
+            // Initialize country code change handler
+            initializeCountryCodeHandler();
+            
             console.log('COD Verifier: Verification box created');
             return $clonedBox;
         } else {
@@ -382,14 +399,25 @@ jQuery(document).ready(function($) {
         }
     }
     
-    // ===== NEW WARNING MESSAGE FUNCTIONS =====
+    function initializeCountryCodeHandler() {
+        // Update helper text when country code changes
+        $(document).on('change', '#cod_country_code', function() {
+            updatePhoneHelperText();
+            // Clear phone input when country changes
+            $('#cod_phone').val('');
+            // Clear any existing messages
+            $('#cod_otp_message').removeClass('success error').hide();
+        });
+        
+        // Initialize helper text
+        updatePhoneHelperText();
+    }
     
     function createWarningMessage() {
         if (warningMessageCreated) {
             return $('#cod-verification-warning-active');
         }
         
-        // Create the warning message HTML
         const warningHTML = `
             <div id="cod-verification-warning-active" class="cod-verification-warning" style="display: none;">
                 <div class="cod-warning-content">
@@ -399,7 +427,6 @@ jQuery(document).ready(function($) {
             </div>
         `;
         
-        // Find insertion point AFTER the actions container
         let $insertionPoint = null;
         
         if (isBlockCheckout) {
@@ -447,18 +474,14 @@ jQuery(document).ready(function($) {
         const selectedMethod = getSelectedPaymentMethod();
         const isCODSelected = selectedMethod === 'cod' || selectedMethod === 'cash_on_delivery';
         
-        // Create warning message if it doesn't exist
         let $warningMessage = $('#cod-verification-warning-active');
         if ($warningMessage.length === 0) {
             $warningMessage = createWarningMessage();
         }
         
-        if ($warningMessage.length === 0) {
-            return; // Could not create warning message
-        }
+        if ($warningMessage.length === 0) return;
         
         if (isCODSelected) {
-            // Check if verification is complete
             let verificationComplete = true;
             
             if (codVerifier.enableOTP === '1' && !window.codVerifierStatus.otpVerified) {
@@ -470,16 +493,13 @@ jQuery(document).ready(function($) {
             }
             
             if (verificationComplete) {
-                // Hide warning message
                 $warningMessage.fadeOut(300);
                 console.log('COD Verifier: Warning message hidden - verification complete');
             } else {
-                // Show warning message
                 $warningMessage.fadeIn(300);
                 console.log('COD Verifier: Warning message shown - verification incomplete');
             }
         } else {
-            // Hide warning message for non-COD methods
             $warningMessage.fadeOut(300);
             console.log('COD Verifier: Warning message hidden - non-COD selected');
         }
@@ -522,8 +542,8 @@ jQuery(document).ready(function($) {
         }
 
         updateHiddenFields();
-        updatePlaceOrderButtonState(); // Update button state after verification status changes
-        updateVerificationWarning(); // Update warning message visibility
+        updatePlaceOrderButtonState();
+        updateVerificationWarning();
     }
     
     function showMessage(type, message, status) {
@@ -531,32 +551,22 @@ jQuery(document).ready(function($) {
         $messageElement.removeClass('success error').addClass(status).html(message).show();
     }
 
-    // Function to manage the Place Order button's disabled/enabled state
     function updatePlaceOrderButtonState() {
         console.log('COD Verifier: updatePlaceOrderButtonState triggered.');
         const $placeOrderButton = $('#place_order, .wc-block-components-checkout-place-order-button, button[type="submit"]');
-        // Directly check if COD is the selected method using reliable selectors
         const isCODSelectedNow = $('input#radio-control-wc-payment-method-options-cod:checked, input[name="payment_method"][value="cod"]:checked, input[name="payment_method"]:checked[value="cash_on_delivery"], .wc-block-components-radio-control__input:checked[value="cod"], .wc-block-components-radio-control__input:checked[value="cash_on_delivery"], input[name*="radio-control-wc-payment-method"]:checked[value="cod"], input[name*="radio-control-wc-payment-method"]:checked[value="cash_on_delivery"], input[name*="payment-method"]:checked[value="cod"], input[name*="payment-method"]:checked[value="cash_on_delivery"], input.wc-payment-method-input:checked[value="cod"], input.wc-payment-method-input:checked[value="cash_on_delivery"]').length > 0;
 
         console.log('COD Verifier: isCODSelectedNow:', isCODSelectedNow);
-        console.log('COD Verifier: codVerifier.enableOTP:', codVerifier.enableOTP);
-        console.log('COD Verifier: window.codVerifierStatus.otpVerified:', window.codVerifierStatus.otpVerified);
-        console.log('COD Verifier: codVerifier.enableToken:', codVerifier.enableToken);
-        console.log('COD Verifier: window.codVerifierStatus.tokenVerified:', window.codVerifierStatus.tokenVerified);
-        const isTokenConfirmed = $('#cod_token_confirmed').is(':checked');
-        console.log('COD Verifier: Token confirmed checkbox checked:', isTokenConfirmed);
-
-
+        
         if (isCODSelectedNow) {
             console.log('COD Verifier: COD selected, checking verification status for button state.');
             let canPlaceOrder = true;
 
-            // Check if OTP is enabled and not verified
             if (codVerifier.enableOTP === '1' && !window.codVerifierStatus.otpVerified) {
                 canPlaceOrder = false;
             }
 
-            // Check if Token is enabled and not verified/confirmed
+            const isTokenConfirmed = $('#cod_token_confirmed').is(':checked');
             if (codVerifier.enableToken === '1' && (!window.codVerifierStatus.tokenVerified || !isTokenConfirmed)) {
                  canPlaceOrder = false;
             }
@@ -571,19 +581,17 @@ jQuery(document).ready(function($) {
                 console.log('COD Verifier: Verification incomplete, disabling place order button.');
             }
         } else {
-            // If not COD, ensure button is enabled
             $placeOrderButton.prop('disabled', false).removeClass('disabled');
             console.log('COD Verifier: Non-COD selected, enabling place order button.');
         }
         
-        // Update warning message after button state change
         updateVerificationWarning();
     }
     
     // ===== PAYMENT METHOD HANDLING =====
     
     function handlePaymentMethodChange() {
-        const selectedMethod = getSelectedPaymentMethod(); // Use getSelectedPaymentMethod here for box visibility
+        const selectedMethod = getSelectedPaymentMethod();
         
         if (selectedMethod === 'cod' || selectedMethod === 'cash_on_delivery') {
             console.log('COD Verifier: COD selected, showing verification box.');
@@ -592,7 +600,6 @@ jQuery(document).ready(function($) {
             console.log('COD Verifier: Non-COD selected, hiding verification box.');
             hideVerificationBox();
         }
-        // Always update button state after any payment method change
         updatePlaceOrderButtonState();
     }
     
@@ -607,7 +614,7 @@ jQuery(document).ready(function($) {
             $wrapper.show();
             console.log('COD Verifier: Verification box shown');
             populatePhoneFromBilling();
-            updateVerificationStatus(); // This will call updatePlaceOrderButtonState
+            updateVerificationStatus();
         }
     }
     
@@ -616,7 +623,7 @@ jQuery(document).ready(function($) {
         if ($wrapper.length > 0) {
             $wrapper.hide();
             console.log('COD Verifier: Verification box hidden');
-            resetVerificationStates(); // This will call updatePlaceOrderButtonState
+            resetVerificationStates();
         }
     }
     
@@ -632,8 +639,14 @@ jQuery(document).ready(function($) {
             }
         }
         
-        if (billingPhone && !$('#cod_phone').val()) {
-            $('#cod_phone').val(billingPhone);
+        // Extract just the number part if it contains country code
+        if (billingPhone) {
+            // Remove common prefixes and non-digits
+            let cleanPhone = billingPhone.replace(/^\+?91|^\+?1|^\+?44|^0/, '').replace(/\D/g, '');
+            
+            if (cleanPhone && !$('#cod_phone').val()) {
+                $('#cod_phone').val(cleanPhone);
+            }
         }
     }
     
@@ -647,47 +660,39 @@ jQuery(document).ready(function($) {
         $('#cod_token_message').removeClass('success error').hide();
         $('#cod_verify_otp').prop('disabled', true).text('Verify').removeClass('verified');
         $('#cod_pay_token').text('Pay ₹1 Token').removeClass('verified');
+        
+        // Clear OTP timer
+        clearOTPTimer();
+        
         updateHiddenFields();
-        updateVerificationStatus(); // This will call updatePlaceOrderButtonState
+        updateVerificationStatus();
     }
     
-// ===== EVENT LISTENERS FOR PAYMENT METHOD CHANGES =====
+    // ===== EVENT LISTENERS FOR PAYMENT METHOD CHANGES =====
 
-    // Listen for changes on the payment method inputs using a broad selector
-    // This primarily triggers showing/hiding the verification box and updates button state.
     $(document).on('change', 'input[name="payment_method"], .wc-block-components-radio-control__input, input[name*="radio-control-wc-payment-method"], input[name*="payment-method"], input.wc-payment-method-input', handlePaymentMethodChange);
 
-    // Listen for WooCommerce's updated_checkout event (triggered after various checkout updates like shipping changes)
     $(document.body).on('updated_checkout', function() {
         console.log('COD Verifier: updated_checkout triggered');
-        // Add a slight delay to ensure DOM updates are complete before checking and updating button state
-        setTimeout(updatePlaceOrderButtonState, 300); // Directly update button state
-        setTimeout(handlePaymentMethodChange, 350); // Also update box visibility
+        setTimeout(updatePlaceOrderButtonState, 300);
+        setTimeout(handlePaymentMethodChange, 350);
     });
 
-    // Listen for changes within the payment method sections specifically (more targeted)
-    $(document).on('change', '#payment, #order_review, .wc-block-checkout', function() { // Added #payment which wraps payment methods in classic checkout
+    $(document).on('change', '#payment, #order_review, .wc-block-checkout', function() {
          console.log('COD Verifier: Payment method section change detected');
-         // Add a small delay
-         setTimeout(updatePlaceOrderButtonState, 200); // Directly update button state
-         setTimeout(handlePaymentMethodChange, 250); // Also update box visibility
+         setTimeout(updatePlaceOrderButtonState, 200);
+         setTimeout(handlePaymentMethodChange, 250);
     });
 
-    // Initial checks with increased and varied delays to improve reliability on page load
-    // These initial checks ensure the box is correctly shown/hidden and button state is set on page load.
-    setTimeout(updatePlaceOrderButtonState, 100); // Fastest initial button state check
-    setTimeout(handlePaymentMethodChange, 150); // Fastest initial box visibility check
-    setTimeout(updatePlaceOrderButtonState, 600); // After basic DOM ready
+    // Initial checks
+    setTimeout(updatePlaceOrderButtonState, 100);
+    setTimeout(handlePaymentMethodChange, 150);
+    setTimeout(updatePlaceOrderButtonState, 600);
     setTimeout(handlePaymentMethodChange, 650);
-    setTimeout(updatePlaceOrderButtonState, 1500); // After potential AJAX updates
+    setTimeout(updatePlaceOrderButtonState, 1500);
     setTimeout(handlePaymentMethodChange, 1550);
-    setTimeout(updatePlaceOrderButtonState, 3000); // A later check for complex scenarios
-    setTimeout(handlePaymentMethodChange, 3050);
-    setTimeout(updatePlaceOrderButtonState, 5000); // A final safety net check
-    setTimeout(handlePaymentMethodChange, 5050);
 
-
-    // ===== OTP VERIFICATION HANDLERS =====
+    // ===== ENHANCED OTP VERIFICATION HANDLERS =====
     
     $(document).on('click', '#cod_send_otp', function(e) {
         e.preventDefault();
@@ -700,17 +705,18 @@ jQuery(document).ready(function($) {
             return;
         }
 
-        const phone = $('#cod_phone').val().trim();
+        const countryCode = $('#cod_country_code').val();
+        const phoneNumber = $('#cod_phone').val().trim();
         
-        if (!phone) {
-            showMessage('otp', 'Please enter your mobile number', 'error');
+        // Validate phone number
+        const validation = validatePhoneNumber(countryCode, phoneNumber);
+        if (!validation.valid) {
+            showMessage('otp', validation.message, 'error');
             return;
         }
         
-        if (!/^[6-9]\d{9}$/.test(phone)) {
-            showMessage('otp', 'Please enter a valid 10-digit mobile number starting with 6-9', 'error');
-            return;
-        }
+        // Create full E.164 format phone number
+        const fullPhone = countryCode + phoneNumber;
         
         $btn.prop('disabled', true).text('Sending...');
         
@@ -719,7 +725,9 @@ jQuery(document).ready(function($) {
             type: 'POST',
             data: {
                 action: 'cod_send_otp',
-                phone: phone,
+                phone: fullPhone,
+                country_code: countryCode,
+                phone_number: phoneNumber,
                 nonce: codVerifier.nonce
             },
             success: function(response) {
@@ -728,55 +736,23 @@ jQuery(document).ready(function($) {
                     if (response.data.test_mode && response.data.otp) {
                         alert('TEST MODE - Your OTP is: ' + response.data.otp);
                     }
-                    startOTPTimer($btn);
-                    window.codVerifierStatus.otpVerified = true; // Update status on success
-                    updateVerificationStatus(); // Update UI and button state
+                    
+                    // Start timer with configured duration
+                    startOTPTimer(settings.otpTimerDuration);
+                    
+                    // Enable OTP input
+                    $('#cod_otp').prop('disabled', false).focus();
                 } else {
                     showMessage('otp', response.data, 'error');
+                    $btn.prop('disabled', false).text('Send OTP');
                 }
             },
             error: function() {
                 showMessage('otp', 'Failed to send OTP. Please try again.', 'error');
-            },
-            complete: function() {
-                 $btn.prop('disabled', false).text('Send OTP');
-                 // Timer will re-enable the button separately
+                $btn.prop('disabled', false).text('Send OTP');
             }
         });
     });
-    
-    // Function to start the OTP resend timer
-    function startOTPTimer($btn, duration = 30) { // Set duration to 30 seconds
-        let timeLeft = duration;
-        $btn.prop('disabled', true);
-
-        // Immediately update text and start timer
-        updateTimerDisplay(timeLeft, $btn);
-
-        const timerInterval = setInterval(function() {
-            timeLeft--;
-            updateTimerDisplay(timeLeft, $btn);
-            
-            if (timeLeft <= 0) {
-                clearInterval(timerInterval);
-                $btn.prop('disabled', false).text('Send OTP');
-            }
-        }, 1000);
-    }
-
-    // Helper function to update the button text with the timer
-    function updateTimerDisplay(timeLeft, $btn) {
-        if (timeLeft > 0) {
-            const minutes = Math.floor(timeLeft / 60);
-            const seconds = timeLeft % 60;
-            const displayTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-            $btn.text(`Resend OTP in ${displayTime}`);
-        } else {
-            // This case should ideally be handled by the interval clearing
-            // but as a fallback, set text to default if timeLeft is 0 or less.
-             $btn.text('Send OTP');
-        }
-    }
     
     $(document).on('input', '#cod_otp', function() {
         const otp = $(this).val().trim();
@@ -809,7 +785,11 @@ jQuery(document).ready(function($) {
                     showMessage('otp', response.data, 'success');
                     window.codVerifierStatus.otpVerified = true;
                     $btn.text('✓ Verified').addClass('verified');
-                    updateVerificationStatus(); // Update UI and button state
+                    
+                    // Clear timer since verification is complete
+                    clearOTPTimer();
+                    
+                    updateVerificationStatus();
                 } else {
                     showMessage('otp', response.data, 'error');
                     $btn.prop('disabled', false).text('Verify');
@@ -817,9 +797,7 @@ jQuery(document).ready(function($) {
             },
             error: function() {
                 showMessage('otp', 'Failed to verify OTP. Please try again.', 'error');
-            },
-             complete: function() {
-                // The button state is managed by updatePlaceOrderButtonState now
+                $btn.prop('disabled', false).text('Verify');
             }
         });
     });
@@ -843,56 +821,48 @@ jQuery(document).ready(function($) {
                 if (response.success) {
                     showMessage('token', response.data, 'success');
                     window.codVerifierStatus.tokenVerified = true;
-                    $('#cod_token_confirmed').prop('checked', true); // Auto-check confirmation on success
+                    $('#cod_token_confirmed').prop('checked', true);
                     $btn.text('✓ Payment Complete').addClass('verified');
-                    updateVerificationStatus(); // Update UI and button state
+                    updateVerificationStatus();
                 } else {
                     showMessage('token', response.data, 'error');
-                    $('#cod_token_confirmed').prop('checked', false); // Uncheck on failure
+                    $('#cod_token_confirmed').prop('checked', false);
                 }
             },
             error: function() {
                 showMessage('token', 'Payment failed. Please try again.', 'error');
-                 $('#cod_token_confirmed').prop('checked', false); // Uncheck on failure
+                 $('#cod_token_confirmed').prop('checked', false);
             },
             complete: function() {
                  $btn.prop('disabled', false).text('Pay ₹1 Token');
-                 updatePlaceOrderButtonState(); // Ensure button state is updated after attempt
+                 updatePlaceOrderButtonState();
             }
         });
     });
 
-    // Listen for changes on the token confirmed checkbox
-     $(document).on('change', '#cod_token_confirmed', function() {
+    $(document).on('change', '#cod_token_confirmed', function() {
           console.log('COD Verifier: Token confirmed checkbox changed.');
-          // This check is also part of updatePlaceOrderButtonState logic now.
-          // We can directly call update button state here.
           updatePlaceOrderButtonState();
      });
     
     // ===== CRITICAL VALIDATION FUNCTION (Updated with Floating Popup) =====
-    // This function acts as a final safety net by checking if the button is disabled.
+    
     function preventOrderPlacement(e) {
         console.log('COD Verifier: preventOrderPlacement triggered (final button check). ');
         const $placeOrderButton = $('#place_order, .wc-block-components-checkout-place-order-button, button[type="submit"]');
 
-        // If the button is disabled by our script, prevent the default action.
-        // This catches attempts to bypass the disabled button (e.g., via JS or double click).
         if ($placeOrderButton.is(':disabled')) {
             console.log('COD Verifier: Order placement prevented by disabled button.');
             if (e && typeof e.preventDefault === 'function') {
                  e.preventDefault();
-                 // Use stopImmediatePropagation to prevent other handlers of the same event
                  if (typeof e.stopImmediatePropagation === 'function') {
                       e.stopImmediatePropagation();
                  }
-                 // Use stopPropagation as a fallback or additional measure
                  if (typeof e.stopPropagation === 'function') {
                       e.stopPropagation();
                  }
             }
 
-            // Show modern floating popup instead of alert
             const selectedMethod = getSelectedPaymentMethod();
             if (selectedMethod === 'cod' || selectedMethod === 'cash_on_delivery') {
                  let errors = [];
@@ -907,7 +877,6 @@ jQuery(document).ready(function($) {
                     const message = 'Please complete the following steps:\n' + errors.join('\n');
                     showFloatingMessage(message, 'Complete Verification');
                     
-                    // Scroll to verification section smoothly
                     const $verificationBox = $('#cod-verifier-wrapper-active');
                     if ($verificationBox.length > 0 && $verificationBox.is(':visible')) {
                         $('html, body').animate({
@@ -917,22 +886,18 @@ jQuery(document).ready(function($) {
                  }
             }
 
-            return false; // Explicitly return false to indicate prevention
+            return false;
         }
 
         console.log('COD Verifier: PreventOrderPlacement check passed, allowing order.');
-        return true; // Allow order placement if button was not disabled by our logic
+        return true;
     }
     
-// ===== COMPREHENSIVE VALIDATION EVENT LISTENERS =====
+    // ===== COMPREHENSIVE VALIDATION EVENT LISTENERS =====
 
-    // Listen for click on Place Order button and similar elements
-    // This listener triggers the final check in preventOrderPlacement.
     $(document).on('click', '#place_order, .wc-block-components-checkout-place-order-button, button[type="submit"]', function(e) {
         console.log('COD Verifier: Order placement attempted via click');
-        // preventOrderPlacement will check the button's disabled state
         if (!preventOrderPlacement(e)) {
-            // If preventOrderPlacement returns false, stop the event.
              e.preventDefault();
              e.stopImmediatePropagation();
              e.stopPropagation();
@@ -940,13 +905,9 @@ jQuery(document).ready(function($) {
         }
     });
 
-    // Listen for form submission (another way order can be triggered)
-    // This listener also triggers the final check in preventOrderPlacement.
     $(document).on('submit', 'form.checkout, form.wc-block-checkout__form, form[name="checkout"]', function(e) {
         console.log('COD Verifier: Form submission attempted');
-        // preventOrderPlacement will check the button's disabled state
         if (!preventOrderPlacement(e)) {
-            // If preventOrderPlacement returns false, stop the event.
             e.preventDefault();
             e.stopImmediatePropagation();
             e.stopPropagation();
@@ -954,76 +915,53 @@ jQuery(document).ready(function($) {
         }
     });
 
-    // Listen for WooCommerce specific checkout events
-    // These events are also now handled by the button state check in preventOrderPlacement.
     $(document).on('checkout_place_order', function(e) {
         console.log('COD Verifier: WooCommerce checkout_place_order event');
-        // Call preventOrderPlacement which checks button state
         if (!preventOrderPlacement(e)) {
              e.preventDefault();
              e.stopImmediatePropagation();
-             return false; // Stop the event if preventOrderPlacement returned false
+             return false;
         }
-        return true; // Allow the event to continue if preventOrderPlacement returned true
+        return true;
     });
 
     $(document).on('checkout_place_order_cod', function(e) {
         console.log('COD Verifier: WooCommerce checkout_place_order_cod event');
-         // Call preventOrderPlacement which checks button state
         if (!preventOrderPlacement(e)) {
              e.preventDefault();
              e.stopImmediatePropagation();
-             return false; // Stop the event if preventOrderPlacement returned false
+             return false;
         }
-        return true; // Allow the event to continue if preventOrderPlacement returned true
+        return true;
     });
 
-    // Ensure classic WooCommerce form validation also uses the simplified check
     $('form.checkout').on('checkout_place_order', function(e) {
         console.log('COD Verifier: Classic checkout form validation');
-         // Call preventOrderPlacement which checks button state
         if (!preventOrderPlacement(e)) {
              e.preventDefault();
              e.stopImmediatePropagation();
-             return false; // Stop the event if preventOrderPlacement returned false
+             return false;
         }
-        return true; // Allow the event to continue if preventOrderPlacement returned true
+        return true;
     });
 
-
     // Additional safety net - continuous validation
-    // This interval helps ensure the box visibility and button state are correct
-    // in case dynamic updates happen without triggering specific events.
     setInterval(function() {
-        // Check payment method periodically to update box visibility
         const selectedMethod = getSelectedPaymentMethod();
         if (selectedMethod === 'cod' || selectedMethod === 'cash_on_delivery') {
             updateHiddenFields();
-            // updatePlaceOrderButtonState is called by updateVerificationStatus and handlePaymentMethodChange now
         } else {
-             // If COD is not selected, still ensure the button is enabled periodically
              const $placeOrderButton = $('#place_order, .wc-block-components-checkout-place-order-button, button[type="submit"]');
              if ($placeOrderButton.is(':disabled')) {
-                  // If button is disabled but COD is not selected, enable it.
-                  // This handles cases where the state might get stuck.
                   $placeOrderButton.prop('disabled', false).removeClass('disabled');
                   console.log('COD Verifier: Interval check: Non-COD selected, ensuring button is enabled.');
              }
         }
+    }, 1500);
 
-    }, 1500); // Check every 1.5 seconds
-
-    // Initial checks with increased and varied delays to improve reliability on page load
-    // These initial checks ensure the box is correctly shown/hidden and button state is set on page load.
-    setTimeout(updatePlaceOrderButtonState, 100); // Fastest initial button state check
-    setTimeout(handlePaymentMethodChange, 150); // Fastest initial box visibility check
-    setTimeout(updatePlaceOrderButtonState, 600); // After basic DOM ready
-    setTimeout(handlePaymentMethodChange, 650);
-    setTimeout(updatePlaceOrderButtonState, 1500); // After potential AJAX updates
-    setTimeout(handlePaymentMethodChange, 1550);
-    setTimeout(updatePlaceOrderButtonState, 3000); // A later check for complex scenarios
-    setTimeout(handlePaymentMethodChange, 3050);
-    setTimeout(updatePlaceOrderButtonState, 5000); // A final safety net check
-    setTimeout(handlePaymentMethodChange, 5050);
+    // Cleanup on page unload
+    $(window).on('beforeunload', function() {
+        clearOTPTimer();
+    });
 
 });

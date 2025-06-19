@@ -24,6 +24,10 @@ function cod_verifier_settings_page() {
         update_option('cod_verifier_enable_token', sanitize_text_field($_POST['enable_token']));
         update_option('cod_verifier_test_mode', sanitize_text_field($_POST['test_mode']));
         
+        // NEW: Multi-country settings
+        update_option('cod_verifier_allowed_regions', sanitize_text_field($_POST['allowed_regions']));
+        update_option('cod_verifier_otp_timer_duration', intval($_POST['otp_timer_duration']));
+        
         // Twilio Settings
         update_option('cod_verifier_twilio_sid', sanitize_text_field($_POST['twilio_sid']));
         update_option('cod_verifier_twilio_token', sanitize_text_field($_POST['twilio_token']));
@@ -40,6 +44,8 @@ function cod_verifier_settings_page() {
     $enable_otp = get_option('cod_verifier_enable_otp', '1');
     $enable_token = get_option('cod_verifier_enable_token', '1');
     $test_mode = get_option('cod_verifier_test_mode', '1');
+    $allowed_regions = get_option('cod_verifier_allowed_regions', 'india');
+    $otp_timer_duration = get_option('cod_verifier_otp_timer_duration', 30);
     $twilio_sid = get_option('cod_verifier_twilio_sid', '');
     $twilio_token = get_option('cod_verifier_twilio_token', '');
     $twilio_number = get_option('cod_verifier_twilio_number', '');
@@ -92,6 +98,34 @@ function cod_verifier_settings_page() {
                 </tr>
             </table>
             
+            <h2><?php _e('🌍 Multi-Country Settings', 'cod-verifier'); ?></h2>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e('Allowed Regions', 'cod-verifier'); ?></th>
+                    <td>
+                        <select name="allowed_regions">
+                            <option value="global" <?php selected($allowed_regions, 'global'); ?>><?php _e('🌍 Global (India, USA, UK)', 'cod-verifier'); ?></option>
+                            <option value="india" <?php selected($allowed_regions, 'india'); ?>><?php _e('🇮🇳 India Only', 'cod-verifier'); ?></option>
+                            <option value="usa" <?php selected($allowed_regions, 'usa'); ?>><?php _e('🇺🇸 USA Only', 'cod-verifier'); ?></option>
+                            <option value="uk" <?php selected($allowed_regions, 'uk'); ?>><?php _e('🇬🇧 UK Only', 'cod-verifier'); ?></option>
+                        </select>
+                        <p class="description">
+                            <?php _e('Select which countries are allowed to use OTP verification. Global allows all supported countries.', 'cod-verifier'); ?>
+                        </p>
+                    </td>
+                </tr>
+                
+                <tr>
+                    <th scope="row"><?php _e('OTP Resend Timer (seconds)', 'cod-verifier'); ?></th>
+                    <td>
+                        <input type="number" name="otp_timer_duration" value="<?php echo esc_attr($otp_timer_duration); ?>" min="15" max="120" class="small-text">
+                        <p class="description">
+                            <?php _e('Time in seconds before user can resend OTP. Recommended: 30 seconds.', 'cod-verifier'); ?>
+                        </p>
+                    </td>
+                </tr>
+            </table>
+            
             <h2><?php _e('SMS Configuration (Twilio)', 'cod-verifier'); ?></h2>
             <table class="form-table">
                 <tr>
@@ -117,7 +151,7 @@ function cod_verifier_settings_page() {
                     <td>
                         <input type="text" name="twilio_number" value="<?php echo esc_attr($twilio_number); ?>" class="regular-text" placeholder="+1234567890">
                         <p class="description">
-                            <?php _e('Your Twilio phone number (with country code, e.g., +1234567890)', 'cod-verifier'); ?>
+                            <?php _e('Your Twilio phone number (with country code, e.g., +1234567890). Must be verified for the regions you want to support.', 'cod-verifier'); ?>
                         </p>
                     </td>
                 </tr>
@@ -146,31 +180,28 @@ function cod_verifier_settings_page() {
         </form>
         
         <div class="card" style="margin-top: 30px; padding: 20px;">
-            <h3><?php _e('🚀 Quick Start Guide', 'cod-verifier'); ?></h3>
+            <h3><?php _e('🚀 Multi-Country Setup Guide', 'cod-verifier'); ?></h3>
             <ol>
-                <li><strong><?php _e('Test Mode Setup:', 'cod-verifier'); ?></strong> <?php _e('Enable Test Mode above and save settings', 'cod-verifier'); ?></li>
-                <li><strong><?php _e('Test the Plugin:', 'cod-verifier'); ?></strong> <?php _e('Go to checkout, select COD, test OTP and token payment', 'cod-verifier'); ?></li>
-                <li><strong><?php _e('Production Setup:', 'cod-verifier'); ?></strong> <?php _e('Add Twilio and Razorpay API keys, then switch to Production Mode', 'cod-verifier'); ?></li>
-                <li><strong><?php _e('Go Live:', 'cod-verifier'); ?></strong> <?php _e('Your plugin is ready for real customers!', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Choose Allowed Regions:', 'cod-verifier'); ?></strong> <?php _e('Select which countries can use OTP verification', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Configure Twilio:', 'cod-verifier'); ?></strong> <?php _e('Add your Twilio credentials and verified phone number', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Test Mode:', 'cod-verifier'); ?></strong> <?php _e('Enable Test Mode and test with different country codes', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Go Live:', 'cod-verifier'); ?></strong> <?php _e('Switch to Production Mode when ready', 'cod-verifier'); ?></li>
             </ol>
             
-            <h4><?php _e('📋 Testing Steps', 'cod-verifier'); ?></h4>
+            <h4><?php _e('📱 Supported Countries', 'cod-verifier'); ?></h4>
             <ul>
-                <li><?php _e('✅ Go to WooCommerce checkout page', 'cod-verifier'); ?></li>
-                <li><?php _e('✅ Select "Cash on Delivery" payment method', 'cod-verifier'); ?></li>
-                <li><?php _e('✅ Verification box should appear below', 'cod-verifier'); ?></li>
-                <li><?php _e('✅ Test OTP: Enter phone number, click Send OTP (check alert for test OTP)', 'cod-verifier'); ?></li>
-                <li><?php _e('✅ Test Token: Click Pay ₹1 Token (payment simulated in test mode)', 'cod-verifier'); ?></li>
-                <li><?php _e('✅ Complete order - should work without errors', 'cod-verifier'); ?></li>
+                <li><?php _e('🇮🇳 India: +91 (existing functionality preserved)', 'cod-verifier'); ?></li>
+                <li><?php _e('🇺🇸 USA: +1 (new)', 'cod-verifier'); ?></li>
+                <li><?php _e('🇬🇧 UK: +44 (new)', 'cod-verifier'); ?></li>
             </ul>
             
-            <h4><?php _e('📱 Twilio Setup Instructions', 'cod-verifier'); ?></h4>
-            <ol>
-                <li><?php _e('Create account at', 'cod-verifier'); ?> <a href="https://www.twilio.com/try-twilio" target="_blank">Twilio</a></li>
-                <li><?php _e('Get a phone number from Twilio Console', 'cod-verifier'); ?></li>
-                <li><?php _e('Copy Account SID, Auth Token, and Phone Number to settings above', 'cod-verifier'); ?></li>
-                <li><?php _e('Test SMS delivery in Test Mode first', 'cod-verifier'); ?></li>
-            </ol>
+            <h4><?php _e('⚠️ Important Notes', 'cod-verifier'); ?></h4>
+            <ul>
+                <li><?php _e('Your Twilio phone number must be verified for the countries you want to support', 'cod-verifier'); ?></li>
+                <li><?php _e('OTP resend timer prevents spam and improves user experience', 'cod-verifier'); ?></li>
+                <li><?php _e('Existing Indian users will continue to work without any changes', 'cod-verifier'); ?></li>
+                <li><?php _e('All phone numbers are validated in E.164 format', 'cod-verifier'); ?></li>
+            </ul>
         </div>
     </div>
     <?php

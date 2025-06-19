@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 $enable_otp = get_option('cod_verifier_enable_otp', '1');
 $enable_token = get_option('cod_verifier_enable_token', '1');
 $test_mode = get_option('cod_verifier_test_mode', '1');
+$allowed_regions = get_option('cod_verifier_allowed_regions', 'india');
+$otp_timer_duration = get_option('cod_verifier_otp_timer_duration', 30);
 ?>
 
 <div id="cod-verifier-wrapper" style="display:none !important; margin: 20px 0; position: relative;">
@@ -36,9 +38,38 @@ $test_mode = get_option('cod_verifier_test_mode', '1');
                 
                 <div class="cod-form-group">
                     <label for="cod_phone">Mobile Number</label>
-                    <div class="cod-input-group">
-                        <input type="tel" id="cod_phone" name="cod_phone" placeholder="Enter 10-digit mobile number" maxlength="10" class="cod-input">
-                        <button type="button" id="cod_send_otp" class="cod-btn cod-btn-primary">Send OTP</button>
+                    <div class="cod-input-group cod-phone-input-group">
+                        <!-- Country Code Dropdown -->
+                        <select id="cod_country_code" name="cod_country_code" class="cod-country-select">
+                            <?php if ($allowed_regions === 'global' || $allowed_regions === 'india'): ?>
+                            <option value="+91" selected>🇮🇳 +91</option>
+                            <?php endif; ?>
+                            <?php if ($allowed_regions === 'global' || $allowed_regions === 'usa'): ?>
+                            <option value="+1">🇺🇸 +1</option>
+                            <?php endif; ?>
+                            <?php if ($allowed_regions === 'global' || $allowed_regions === 'uk'): ?>
+                            <option value="+44">🇬🇧 +44</option>
+                            <?php endif; ?>
+                        </select>
+                        
+                        <!-- Phone Number Input -->
+                        <input type="tel" id="cod_phone" name="cod_phone" placeholder="Enter phone number" class="cod-input cod-phone-input">
+                        
+                        <!-- Send OTP Button -->
+                        <button type="button" id="cod_send_otp" class="cod-btn cod-btn-primary cod-send-otp-btn">Send OTP</button>
+                    </div>
+                    <div class="cod-phone-help">
+                        <small id="cod_phone_help_text">
+                            <?php if ($allowed_regions === 'india'): ?>
+                                Enter 10-digit Indian mobile number (e.g., 7039940998)
+                            <?php elseif ($allowed_regions === 'usa'): ?>
+                                Enter 10-digit US phone number (e.g., 2125551234)
+                            <?php elseif ($allowed_regions === 'uk'): ?>
+                                Enter UK phone number (e.g., 7700900123)
+                            <?php else: ?>
+                                Select country and enter phone number
+                            <?php endif; ?>
+                        </small>
                     </div>
                 </div>
                 
@@ -108,3 +139,12 @@ $test_mode = get_option('cod_verifier_test_mode', '1');
         </div>
     </div>
 </div>
+
+<!-- Hidden data for JavaScript -->
+<script type="text/javascript">
+window.codVerifierSettings = {
+    allowedRegions: '<?php echo esc_js($allowed_regions); ?>',
+    otpTimerDuration: <?php echo intval($otp_timer_duration); ?>,
+    testMode: '<?php echo esc_js($test_mode); ?>'
+};
+</script>

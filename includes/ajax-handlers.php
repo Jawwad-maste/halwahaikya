@@ -21,10 +21,24 @@ class CODVerifierAjax {
             return;
         }
         
-        $phone = sanitize_text_field($_POST['phone']);
+        // Get phone data - support both old and new format
+        $phone = sanitize_text_field($_POST['phone']); // Full E.164 format
+        $country_code = isset($_POST['country_code']) ? sanitize_text_field($_POST['country_code']) : '';
+        $phone_number = isset($_POST['phone_number']) ? sanitize_text_field($_POST['phone_number']) : '';
         
-        if (empty($phone) || !preg_match('/^[6-9]\d{9}$/', $phone)) {
-            wp_send_json_error(__('Please enter a valid 10-digit mobile number.', 'cod-verifier'));
+        // Validate allowed regions
+        $allowed_regions = get_option('cod_verifier_allowed_regions', 'india');
+        $region_validation = $this->validate_phone_region($phone, $allowed_regions);
+        
+        if (!$region_validation['valid']) {
+            wp_send_json_error($region_validation['message']);
+            return;
+        }
+        
+        // Enhanced phone validation
+        $phone_validation = $this->validate_phone_number($phone, $country_code, $phone_number);
+        if (!$phone_validation['valid']) {
+            wp_send_json_error($phone_validation['message']);
             return;
         }
         
@@ -34,9 +48,11 @@ class CODVerifierAjax {
             session_start();
         }
         
-        // Check if enough time has passed since the last OTP request (30 seconds cooldown)
-        if (isset($_SESSION['cod_otp_time']) && (time() - $_SESSION['cod_otp_time'] < 30)) {
-            wp_send_json_error(__('Please wait before resending OTP.', 'cod-verifier'));
+        // Check cooldown period (prevent spam)
+        $cooldown_duration = get_option('cod_verifier_otp_timer_duration', 30);
+        if (isset($_SESSION['cod_otp_time']) && (time() - $_SESSION['cod_otp_time'] < $cooldown_duration)) {
+            $remaining = $cooldown_duration - (time() - $_SESSION['cod_otp_time']);
+            wp_send_json_error(sprintf(__('Please wait %d seconds before resending OTP.', 'cod-verifier'), $remaining));
             return;
         }
 
@@ -68,6 +84,129 @@ class CODVerifierAjax {
         }
     }
     
+    /**
+     * Validate phone number against allowed regions
+     */
+    private function validate_phone_region($phone, $allowed_regions) {
+        // Extract country code from phone number
+        $country_code = '';
+        if (strpos($phone, '+91') === 0) {
+            $country_code = '+91';
+        } elseif (strpos($phone, '+1') === 0) {
+            $country_code = '+1';
+        } elseif (strpos($phone, '+44') === 0) {
+            $country_code = '+44';
+        } else {
+            return array(
+                'valid' => false,
+                'message' => __('Invalid phone number format. Please include country code.', 'cod-verifier')
+            );
+        }
+        
+        // Check against allowed regions
+        switch ($allowed_regions) {
+            case 'india':
+                if ($country_code !== '+91') {
+                    return array(
+                        'valid' => false,
+                        'message' => __('Only Indian phone numbers (+91) are allowed.', 'cod-verifier')
+                    );
+                }
+                break;
+                
+            case 'usa':
+                if ($country_code !== '+1') {
+                    return array(
+                        'valid' => false,
+                        'message' => __('Only US phone numbers (+1) are allowed.', 'cod-verifier')
+                    );
+                }
+                break;
+                
+            case 'uk':
+                if ($country_code !== '+44') {
+                    return array(
+                        'valid' => false,
+                        'message' => __('Only UK phone numbers (+44) are allowed.', 'cod-verifier')
+                    );
+                }
+                break;
+                
+            case 'global':
+                // All supported countries are allowed
+                if (!in_array($country_code, ['+91', '+1', '+44'])) {
+                    return array(
+                        'valid' => false,
+                        'message' => __('Unsupported country code. Supported: +91 (India), +1 (USA), +44 (UK).', 'cod-verifier')
+                    );
+                }
+                break;
+                
+            default:
+                return array(
+                    'valid' => false,
+                    'message' => __('Invalid region configuration.', 'cod-verifier')
+                );
+        }
+        
+        return array('valid' => true, 'message' => 'Valid region');
+    }
+    
+    /**
+     * Enhanced phone number validation for multiple countries
+     */
+    private function validate_phone_number($phone, $country_code = '', $phone_number = '') {
+        // Validation rules for each country
+        $validation_rules = array(
+            '+91' => array(
+                'pattern' => '/^\+91[6-9]\d{9}$/',
+                'name' => 'Indian',
+                'example' => '+917039940998'
+            ),
+            '+1' => array(
+                'pattern' => '/^\+1[2-9]\d{9}$/',
+                'name' => 'US',
+                'example' => '+12125551234'
+            ),
+            '+44' => array(
+                'pattern' => '/^\+447\d{9}$/',
+                'name' => 'UK',
+                'example' => '+447700900123'
+            )
+        );
+        
+        // Determine country code from phone number
+        $detected_country = '';
+        foreach ($validation_rules as $code => $rule) {
+            if (strpos($phone, $code) === 0) {
+                $detected_country = $code;
+                break;
+            }
+        }
+        
+        if (empty($detected_country)) {
+            return array(
+                'valid' => false,
+                'message' => __('Invalid phone number format. Supported formats: +91 (India), +1 (USA), +44 (UK).', 'cod-verifier')
+            );
+        }
+        
+        $rule = $validation_rules[$detected_country];
+        
+        if (!preg_match($rule['pattern'], $phone)) {
+            return array(
+                'valid' => false,
+                'message' => sprintf(
+                    __('Please enter a valid %s phone number (e.g., %s).', 'cod-verifier'),
+                    $rule['name'],
+                    $rule['example']
+                )
+            );
+        }
+        
+        return array('valid' => true, 'message' => 'Valid phone number');
+    }
+    
     private function send_twilio_sms($phone, $otp) {
         try {
             // Get Twilio settings
@@ -95,41 +234,33 @@ class CODVerifierAjax {
             
             require_once $twilio_autoload;
             
-            // Clean and format phone number for international format (E.164)
-            $cleaned_phone = preg_replace('/\D/', '', $phone); // Remove all non-digits
+            // Phone number is already in E.164 format from frontend validation
+            $formatted_phone = $phone;
             
-            // Basic validation after cleaning
-            if (empty($cleaned_phone) || strlen($cleaned_phone) < 10 || strlen($cleaned_phone) > 15) { // Allow some range for international numbers if needed later
-                 return array(
+            // Final validation for E.164 format
+            if (!preg_match('/^\+\d{10,15}$/', $formatted_phone)) {
+                return array(
                     'success' => false,
-                    'message' => __('Invalid phone number format after cleaning.', 'cod-verifier')
+                    'message' => __('Invalid phone number format for SMS delivery.', 'cod-verifier')
                 );
             }
-
-            // Assuming Indian numbers for +91 prefix. For international, more complex logic needed.
-            // If cleaned number starts with +91 already, don't add it again.
-            if (substr($cleaned_phone, 0, 2) === '91') {
-                 $formatted_phone = '+91' . $cleaned_phone; // Assuming 91XXXXXXXXXX format input
-            } elseif (substr($cleaned_phone, 0, 1) === '0') {
-                 $formatted_phone = '+91' . substr($cleaned_phone, 1); // Assuming 0XXXXXXXXXX format input
-            } else {
-                $formatted_phone = '+91' . $cleaned_phone; // Assuming 10-digit number like XXXXXXXXXX
-            }
-
-            // Final check for E.164 format (starts with +, followed by digits)
-             if (!preg_match('/^\+\d{10,15}$/', $formatted_phone)) {
-                  return array(
-                    'success' => false,
-                    'message' => __('Final phone number format is invalid.', 'cod-verifier')
-                );
-             }
 
             // Create Twilio client
             $client = new \Twilio\Rest\Client($sid, $token);
             
-            // Send SMS
-            $message = "Your COD verification OTP is: {$otp}. Valid for 5 minutes. Do not share this code.";
+            // Customize message based on country
+            $country_name = 'your';
+            if (strpos($phone, '+91') === 0) {
+                $country_name = 'Indian';
+            } elseif (strpos($phone, '+1') === 0) {
+                $country_name = 'US';
+            } elseif (strpos($phone, '+44') === 0) {
+                $country_name = 'UK';
+            }
             
+            $message = "Your COD verification OTP is: {$otp}. Valid for 5 minutes. Do not share this code. - COD Verifier";
+            
+            // Send SMS
             $result = $client->messages->create(
                 $formatted_phone,
                 array(
@@ -139,10 +270,10 @@ class CODVerifierAjax {
             );
             
             if ($result->sid) {
-                error_log('COD Verifier: SMS sent successfully. SID: ' . $result->sid);
+                error_log('COD Verifier: SMS sent successfully to ' . $formatted_phone . '. SID: ' . $result->sid);
                 return array(
                     'success' => true,
-                    'message' => __('OTP sent successfully!', 'cod-verifier')
+                    'message' => sprintf(__('OTP sent successfully to your %s number!', 'cod-verifier'), $country_name)
                 );
             } else {
                 error_log('COD Verifier: SMS sending failed - no SID returned');
@@ -154,9 +285,26 @@ class CODVerifierAjax {
             
         } catch (\Twilio\Exceptions\RestException $e) {
             error_log('COD Verifier: Twilio REST Exception: ' . $e->getMessage());
+            
+            // Provide user-friendly error messages
+            $error_code = $e->getCode();
+            switch ($error_code) {
+                case 21211:
+                    $user_message = __('Invalid phone number. Please check and try again.', 'cod-verifier');
+                    break;
+                case 21408:
+                    $user_message = __('SMS not supported for this number. Please try a different number.', 'cod-verifier');
+                    break;
+                case 21614:
+                    $user_message = __('Invalid sender number configuration. Please contact support.', 'cod-verifier');
+                    break;
+                default:
+                    $user_message = __('SMS service error. Please check your phone number and try again.', 'cod-verifier');
+            }
+            
             return array(
                 'success' => false,
-                'message' => __('SMS service error. Please check your phone number and try again.', 'cod-verifier')
+                'message' => $user_message
             );
         } catch (Exception $e) {
             error_log('COD Verifier: General Exception: ' . $e->getMessage());

@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: COD Verifier for WooCommerce
-Description: OTP + Token verification for WooCommerce COD orders with Twilio SMS integration
-Version: 1.1.0
+Description: Multi-country OTP + Token verification for WooCommerce COD orders with Twilio SMS integration
+Version: 1.2.0
 Author: Your Name
 Requires at least: 5.0
 Tested up to: 6.4
@@ -19,7 +19,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('COD_VERIFIER_VERSION', '1.1.0');
+define('COD_VERIFIER_VERSION', '1.2.0');
 define('COD_VERIFIER_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('COD_VERIFIER_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
@@ -123,6 +123,8 @@ class CODVerifier {
                 'enableOTP' => get_option('cod_verifier_enable_otp', '1'),
                 'enableToken' => get_option('cod_verifier_enable_token', '1'),
                 'testMode' => get_option('cod_verifier_test_mode', '1'),
+                'allowedRegions' => get_option('cod_verifier_allowed_regions', 'india'),
+                'otpTimerDuration' => get_option('cod_verifier_otp_timer_duration', 30),
             ));
         }
     }
@@ -225,6 +227,7 @@ class CODVerifier {
         
         $enable_otp = get_option('cod_verifier_enable_otp', '1');
         $test_mode = get_option('cod_verifier_test_mode', '1');
+        $allowed_regions = get_option('cod_verifier_allowed_regions', 'india');
         
         // Check Twilio configuration in production mode
         if ($enable_otp === '1' && $test_mode === '0') {
@@ -247,6 +250,13 @@ class CODVerifier {
             echo __('COD Verifier: Twilio SDK not found. Please ensure the Twilio SDK is properly installed in the includes/twilio-sdk/ directory.', 'cod-verifier');
             echo '</p></div>';
         }
+        
+        // Multi-country configuration notice
+        if ($allowed_regions === 'global') {
+            echo '<div class="notice notice-info"><p>';
+            echo __('COD Verifier: Multi-country mode is enabled. Ensure your Twilio number supports SMS to India (+91), USA (+1), and UK (+44).', 'cod-verifier');
+            echo '</p></div>';
+        }
     }
     
     public function woocommerce_missing_notice() {
@@ -266,6 +276,8 @@ class CODVerifier {
         add_option('cod_verifier_enable_otp', '1');
         add_option('cod_verifier_enable_token', '1');
         add_option('cod_verifier_test_mode', '1');
+        add_option('cod_verifier_allowed_regions', 'india'); // Default to India for backward compatibility
+        add_option('cod_verifier_otp_timer_duration', 30); // Default 30 seconds
         add_option('cod_verifier_twilio_sid', '');
         add_option('cod_verifier_twilio_token', '');
         add_option('cod_verifier_twilio_number', '');
