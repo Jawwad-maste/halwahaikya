@@ -1,7 +1,7 @@
 jQuery(document).ready(function($) {
     'use strict';
     
-    console.log('COD Verifier: Multi-country script initialized');
+    console.log('COD Verifier: Multi-country script with Razorpay initialized');
     
     // Check if codVerifier is defined
     if (typeof codVerifier === 'undefined') {
@@ -26,6 +26,7 @@ jQuery(document).ready(function($) {
     let verificationBoxCreated = false;
     let warningMessageCreated = false;
     let otpTimer = null;
+    let tokenTimer = null; // NEW: Token payment timer
     
     console.log('COD Verifier: Checkout type:', isBlockCheckout ? 'Blocks' : 'Classic');
     console.log('COD Verifier: Settings:', settings);
@@ -139,6 +140,75 @@ jQuery(document).ready(function($) {
                 .removeClass('cod-btn-timer-active')
                 .addClass('cod-btn-primary')
                 .text('Send OTP');
+        }
+    }
+    
+    // ===== NEW: TOKEN PAYMENT TIMER FUNCTIONALITY =====
+    
+    function startTokenTimer(duration) {
+        const $btn = $('#cod_pay_token');
+        let timeLeft = duration;
+        
+        // Start countdown
+        tokenTimer = setInterval(() => {
+            if (timeLeft > 0) {
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                const displayTime = seconds < 10 ? `0${seconds}` : seconds;
+                
+                if (minutes > 0) {
+                    $btn.text(`Payment expires in ${minutes}:${displayTime}`);
+                } else {
+                    $btn.text(`Payment expires in ${seconds}s`);
+                }
+                
+                timeLeft--;
+            } else {
+                clearInterval(tokenTimer);
+                tokenTimer = null;
+                
+                // Reset button and hide QR/payment UI
+                $btn.prop('disabled', false).text('Pay ₹1 Token').removeClass('verified');
+                $('#cod-token-qr-container').hide();
+                $('#cod_token_message').removeClass('success error').hide();
+                
+                showMessage('token', '⛔ Payment session expired. Please try again.', 'error');
+                console.log('COD Verifier: Token payment timer expired');
+            }
+        }, 1000);
+        
+        console.log('COD Verifier: Token payment timer started for', duration, 'seconds');
+    }
+    
+    function clearTokenTimer() {
+        if (tokenTimer) {
+            clearInterval(tokenTimer);
+            tokenTimer = null;
+        }
+    }
+    
+    // ===== DEVICE DETECTION & UI SWITCHING =====
+    
+    function isMobileDevice() {
+        return window.innerWidth <= 768;
+    }
+    
+    function createQRContainer() {
+        if ($('#cod-token-qr-container').length === 0) {
+            const qrHTML = `
+                <div id="cod-token-qr-container" style="display: none; text-align: center; margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div id="cod-token-qr-content">
+                        <div style="margin-bottom: 10px; font-weight: 500; color: #374151;">
+                            🛈 Scan this QR code with any UPI app
+                        </div>
+                        <div id="cod-token-qr-image" style="margin: 10px 0;"></div>
+                        <div style="font-size: 12px; color: #6b7280;">
+                            Payment will expire in 2 minutes
+                        </div>
+                    </div>
+                </div>
+            `;
+            $('#cod_pay_token').after(qrHTML);
         }
     }
     
@@ -390,6 +460,9 @@ jQuery(document).ready(function($) {
             
             // Initialize country code change handler
             initializeCountryCodeHandler();
+            
+            // Create QR container for token payments
+            createQRContainer();
             
             console.log('COD Verifier: Verification box created');
             return $clonedBox;
@@ -660,9 +733,11 @@ jQuery(document).ready(function($) {
         $('#cod_token_message').removeClass('success error').hide();
         $('#cod_verify_otp').prop('disabled', true).text('Verify').removeClass('verified');
         $('#cod_pay_token').text('Pay ₹1 Token').removeClass('verified');
+        $('#cod-token-qr-container').hide();
         
-        // Clear OTP timer
+        // Clear timers
         clearOTPTimer();
+        clearTokenTimer();
         
         updateHiddenFields();
         updateVerificationStatus();
@@ -802,43 +877,195 @@ jQuery(document).ready(function($) {
         });
     });
     
-    // ===== TOKEN PAYMENT HANDLERS =====
+    // ===== NEW: RAZORPAY TOKEN PAYMENT HANDLERS =====
     
     $(document).on('click', '#cod_pay_token', function(e) {
         e.preventDefault();
         
         const $btn = $(this);
-        $btn.prop('disabled', true).text('Processing...');
+        
+        // Don't prevent if user wants to retry after expiry
+        if ($btn.hasClass('verified')) {
+            return; // Already verified, do nothing
+        }
+        
+        $btn.prop('disabled', true).text('Creating payment...');
         
         $.ajax({
             url: codVerifier.ajaxUrl,
             type: 'POST',
             data: {
-                action: 'cod_token_payment',
+                action: 'cod_create_razorpay_order',
                 nonce: codVerifier.nonce
             },
             success: function(response) {
                 if (response.success) {
-                    showMessage('token', response.data, 'success');
-                    window.codVerifierStatus.tokenVerified = true;
-                    $('#cod_token_confirmed').prop('checked', true);
-                    $btn.text('✓ Payment Complete').addClass('verified');
-                    updateVerificationStatus();
+                    handleRazorpayOrder(response.data, $btn);
                 } else {
                     showMessage('token', response.data, 'error');
-                    $('#cod_token_confirmed').prop('checked', false);
+                    $btn.prop('disabled', false).text('Pay ₹1 Token');
                 }
             },
             error: function() {
-                showMessage('token', 'Payment failed. Please try again.', 'error');
-                 $('#cod_token_confirmed').prop('checked', false);
-            },
-            complete: function() {
-                 $btn.prop('disabled', false).text('Pay ₹1 Token');
-                 updatePlaceOrderButtonState();
+                showMessage('token', 'Failed to create payment order. Please try again.', 'error');
+                $btn.prop('disabled', false).text('Pay ₹1 Token');
             }
         });
     });
+    
+    function handleRazorpayOrder(orderData, $btn) {
+        const isMobile = isMobileDevice();
+        
+        console.log('COD Verifier: Device detection - Mobile:', isMobile, 'Width:', window.innerWidth);
+        
+        if (orderData.test_mode) {
+            // Test mode - simulate payment
+            showMessage('token', '🔒 Test Mode: Payment simulation started', 'success');
+            
+            if (isMobile) {
+                showMessage('token', '📱 Mobile: Simulating Razorpay popup...', 'success');
+            } else {
+                $('#cod-token-qr-container').show();
+                $('#cod-token-qr-image').html('<div style="width: 200px; height: 200px; background: #f0f0f0; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; margin: 0 auto; border-radius: 8px;"><span style="color: #666; font-size: 14px;">TEST QR CODE</span></div>');
+                showMessage('token', '🖥️ Desktop: Test QR code displayed', 'success');
+            }
+            
+            // Start 2-minute timer
+            startTokenTimer(120);
+            
+            // Simulate successful payment after 3 seconds
+            setTimeout(() => {
+                simulateSuccessfulPayment();
+            }, 3000);
+            
+        } else {
+            // Production mode
+            if (typeof Razorpay === 'undefined') {
+                // Load Razorpay script dynamically
+                const script = document.createElement('script');
+                script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+                script.onload = () => {
+                    initializeRazorpayPayment(orderData, $btn, isMobile);
+                };
+                script.onerror = () => {
+                    showMessage('token', 'Failed to load payment gateway. Please refresh and try again.', 'error');
+                    $btn.prop('disabled', false).text('Pay ₹1 Token');
+                };
+                document.head.appendChild(script);
+            } else {
+                initializeRazorpayPayment(orderData, $btn, isMobile);
+            }
+        }
+    }
+    
+    function initializeRazorpayPayment(orderData, $btn, isMobile) {
+        const options = {
+            key: orderData.key_id,
+            amount: orderData.amount,
+            currency: orderData.currency,
+            name: 'COD Token Verification',
+            description: '₹1 verification payment (will be refunded)',
+            order_id: orderData.order_id,
+            handler: function(response) {
+                verifyRazorpayPayment(response);
+            },
+            prefill: {
+                contact: $('#cod_phone').val() ? $('#cod_country_code').val() + $('#cod_phone').val() : ''
+            },
+            theme: {
+                color: '#667eea'
+            },
+            modal: {
+                ondismiss: function() {
+                    // User closed popup - allow retry
+                    $btn.prop('disabled', false).text('Pay ₹1 Token');
+                    showMessage('token', 'Payment cancelled. You can try again.', 'error');
+                }
+            }
+        };
+        
+        const rzp = new Razorpay(options);
+        
+        if (isMobile) {
+            // Mobile: Show popup directly
+            rzp.open();
+            showMessage('token', '🔒 Secure Payment · ₹1 will be refunded automatically', 'success');
+        } else {
+            // Desktop: Show QR code
+            $('#cod-token-qr-container').show();
+            
+            if (orderData.qr_code_url) {
+                $('#cod-token-qr-image').html(`<img src="${orderData.qr_code_url}" alt="Payment QR Code" style="max-width: 200px; border-radius: 8px; border: 1px solid #e2e8f0;">`);
+            } else {
+                $('#cod-token-qr-image').html('<div style="width: 200px; height: 200px; background: #f0f0f0; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; margin: 0 auto; border-radius: 8px;"><span style="color: #666; font-size: 14px;">QR Code Loading...</span></div>');
+            }
+            
+            showMessage('token', '🛈 Scan QR code with any UPI app. ₹1 will be refunded.', 'success');
+        }
+        
+        // Start 2-minute timer
+        startTokenTimer(120);
+    }
+    
+    function simulateSuccessfulPayment() {
+        // Test mode simulation
+        $.ajax({
+            url: codVerifier.ajaxUrl,
+            type: 'POST',
+            data: {
+                action: 'cod_verify_razorpay_payment',
+                test_mode: true,
+                nonce: codVerifier.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    handleSuccessfulPayment(response.data);
+                }
+            }
+        });
+    }
+    
+    function verifyRazorpayPayment(razorpayResponse) {
+        $.ajax({
+            url: codVerifier.ajaxUrl,
+            type: 'POST',
+            data: {
+                action: 'cod_verify_razorpay_payment',
+                payment_id: razorpayResponse.razorpay_payment_id,
+                order_id: razorpayResponse.razorpay_order_id,
+                signature: razorpayResponse.razorpay_signature,
+                nonce: codVerifier.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    handleSuccessfulPayment(response.data);
+                } else {
+                    showMessage('token', response.data, 'error');
+                    $('#cod_pay_token').prop('disabled', false).text('Pay ₹1 Token');
+                }
+            },
+            error: function() {
+                showMessage('token', 'Payment verification failed. Please try again.', 'error');
+                $('#cod_pay_token').prop('disabled', false).text('Pay ₹1 Token');
+            }
+        });
+    }
+    
+    function handleSuccessfulPayment(message) {
+        // Clear timer
+        clearTokenTimer();
+        
+        // Update UI
+        window.codVerifierStatus.tokenVerified = true;
+        $('#cod_token_confirmed').prop('checked', true);
+        $('#cod_pay_token').text('✓ Payment Complete').addClass('verified').prop('disabled', false);
+        $('#cod-token-qr-container').hide();
+        
+        showMessage('token', message, 'success');
+        updateVerificationStatus();
+        
+        console.log('COD Verifier: Token payment completed successfully');
+    }
 
     $(document).on('change', '#cod_token_confirmed', function() {
           console.log('COD Verifier: Token confirmed checkbox changed.');
@@ -962,6 +1189,7 @@ jQuery(document).ready(function($) {
     // Cleanup on page unload
     $(window).on('beforeunload', function() {
         clearOTPTimer();
+        clearTokenTimer();
     });
 
 });

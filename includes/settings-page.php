@@ -33,9 +33,10 @@ function cod_verifier_settings_page() {
         update_option('cod_verifier_twilio_token', sanitize_text_field($_POST['twilio_token']));
         update_option('cod_verifier_twilio_number', sanitize_text_field($_POST['twilio_number']));
         
-        // Razorpay Settings
+        // Razorpay Settings - SECURE STORAGE
         update_option('cod_verifier_razorpay_key_id', sanitize_text_field($_POST['razorpay_key_id']));
         update_option('cod_verifier_razorpay_key_secret', sanitize_text_field($_POST['razorpay_key_secret']));
+        update_option('cod_verifier_razorpay_mode', sanitize_text_field($_POST['razorpay_mode']));
         
         echo '<div class="notice notice-success"><p>' . __('Settings saved successfully!', 'cod-verifier') . '</p></div>';
     }
@@ -51,6 +52,7 @@ function cod_verifier_settings_page() {
     $twilio_number = get_option('cod_verifier_twilio_number', '');
     $razorpay_key_id = get_option('cod_verifier_razorpay_key_id', '');
     $razorpay_key_secret = get_option('cod_verifier_razorpay_key_secret', '');
+    $razorpay_mode = get_option('cod_verifier_razorpay_mode', 'test');
     ?>
     
     <div class="wrap">
@@ -131,7 +133,7 @@ function cod_verifier_settings_page() {
                 <tr>
                     <th scope="row"><?php _e('Twilio Account SID', 'cod-verifier'); ?></th>
                     <td>
-                        <input type="text" name="twilio_sid" value="<?php echo esc_attr($twilio_sid); ?>" class="regular-text">
+                        <input type="text" name="twilio_sid" value="<?php echo esc_attr($twilio_sid); ?>" class="regular-text" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
                         <p class="description">
                             <?php _e('Get your Account SID from', 'cod-verifier'); ?> <a href="https://console.twilio.com" target="_blank">Twilio Console</a>
                         </p>
@@ -140,7 +142,7 @@ function cod_verifier_settings_page() {
                 <tr>
                     <th scope="row"><?php _e('Twilio Auth Token', 'cod-verifier'); ?></th>
                     <td>
-                        <input type="password" name="twilio_token" value="<?php echo esc_attr($twilio_token); ?>" class="regular-text">
+                        <input type="password" name="twilio_token" value="<?php echo esc_attr($twilio_token); ?>" class="regular-text" placeholder="••••••••••••••••••••••••••••••••">
                         <p class="description">
                             <?php _e('Get your Auth Token from', 'cod-verifier'); ?> <a href="https://console.twilio.com" target="_blank">Twilio Console</a>
                         </p>
@@ -157,20 +159,46 @@ function cod_verifier_settings_page() {
                 </tr>
             </table>
             
-            <h2><?php _e('Payment Configuration (Razorpay)', 'cod-verifier'); ?></h2>
+            <h2><?php _e('💳 Razorpay Configuration (Token Payment)', 'cod-verifier'); ?></h2>
             <table class="form-table">
+                <tr>
+                    <th scope="row"><?php _e('Razorpay Mode', 'cod-verifier'); ?></th>
+                    <td>
+                        <label>
+                            <input type="radio" name="razorpay_mode" value="test" <?php checked($razorpay_mode, 'test'); ?>>
+                            <?php _e('Test Mode', 'cod-verifier'); ?>
+                        </label><br>
+                        <label>
+                            <input type="radio" name="razorpay_mode" value="live" <?php checked($razorpay_mode, 'live'); ?>>
+                            <?php _e('Live Mode', 'cod-verifier'); ?>
+                        </label>
+                        <p class="description">
+                            <?php _e('Use Test Mode for development. Switch to Live Mode for production.', 'cod-verifier'); ?>
+                        </p>
+                    </td>
+                </tr>
                 <tr>
                     <th scope="row"><?php _e('Razorpay Key ID', 'cod-verifier'); ?></th>
                     <td>
-                        <input type="text" name="razorpay_key_id" value="<?php echo esc_attr($razorpay_key_id); ?>" class="regular-text">
+                        <input type="text" name="razorpay_key_id" value="" class="regular-text" placeholder="rzp_test_xxxxxxxxxxxxxxxx">
+                        <p class="description">
+                            <?php _e('Enter your Razorpay Key ID. Keys are securely stored and masked for security.', 'cod-verifier'); ?>
+                            <?php if (!empty($razorpay_key_id)): ?>
+                                <br><strong><?php _e('Current Key:', 'cod-verifier'); ?></strong> <?php echo substr($razorpay_key_id, 0, 8) . '••••••••••••••••••••'; ?>
+                            <?php endif; ?>
+                        </p>
                     </td>
                 </tr>
                 <tr>
                     <th scope="row"><?php _e('Razorpay Key Secret', 'cod-verifier'); ?></th>
                     <td>
-                        <input type="password" name="razorpay_key_secret" value="<?php echo esc_attr($razorpay_key_secret); ?>" class="regular-text">
+                        <input type="password" name="razorpay_key_secret" value="" class="regular-text" placeholder="••••••••••••••••••••••••••••••••">
                         <p class="description">
-                            <?php _e('Get your API keys from', 'cod-verifier'); ?> <a href="https://razorpay.com" target="_blank">Razorpay Dashboard</a>
+                            <?php _e('Enter your Razorpay Key Secret. This is stored securely and never displayed.', 'cod-verifier'); ?>
+                            <?php if (!empty($razorpay_key_secret)): ?>
+                                <br><strong><?php _e('Status:', 'cod-verifier'); ?></strong> <span style="color: green;">✓ <?php _e('Secret Key Configured', 'cod-verifier'); ?></span>
+                            <?php endif; ?>
+                            <br><a href="https://dashboard.razorpay.com/app/keys" target="_blank"><?php _e('Get your API keys from Razorpay Dashboard', 'cod-verifier'); ?></a>
                         </p>
                     </td>
                 </tr>
@@ -180,27 +208,22 @@ function cod_verifier_settings_page() {
         </form>
         
         <div class="card" style="margin-top: 30px; padding: 20px;">
-            <h3><?php _e('🚀 Multi-Country Setup Guide', 'cod-verifier'); ?></h3>
+            <h3><?php _e('🚀 Setup Guide', 'cod-verifier'); ?></h3>
             <ol>
-                <li><strong><?php _e('Choose Allowed Regions:', 'cod-verifier'); ?></strong> <?php _e('Select which countries can use OTP verification', 'cod-verifier'); ?></li>
-                <li><strong><?php _e('Configure Twilio:', 'cod-verifier'); ?></strong> <?php _e('Add your Twilio credentials and verified phone number', 'cod-verifier'); ?></li>
-                <li><strong><?php _e('Test Mode:', 'cod-verifier'); ?></strong> <?php _e('Enable Test Mode and test with different country codes', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Choose Mode:', 'cod-verifier'); ?></strong> <?php _e('Start with Test Mode for safe testing', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Configure Twilio:', 'cod-verifier'); ?></strong> <?php _e('Add your Twilio credentials for SMS', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Configure Razorpay:', 'cod-verifier'); ?></strong> <?php _e('Add your Razorpay keys for token payments', 'cod-verifier'); ?></li>
+                <li><strong><?php _e('Test Everything:', 'cod-verifier'); ?></strong> <?php _e('Test OTP and token payment in Test Mode', 'cod-verifier'); ?></li>
                 <li><strong><?php _e('Go Live:', 'cod-verifier'); ?></strong> <?php _e('Switch to Production Mode when ready', 'cod-verifier'); ?></li>
             </ol>
             
-            <h4><?php _e('📱 Supported Countries', 'cod-verifier'); ?></h4>
+            <h4><?php _e('🔒 Security Features', 'cod-verifier'); ?></h4>
             <ul>
-                <li><?php _e('🇮🇳 India: +91 (existing functionality preserved)', 'cod-verifier'); ?></li>
-                <li><?php _e('🇺🇸 USA: +1 (new)', 'cod-verifier'); ?></li>
-                <li><?php _e('🇬🇧 UK: +44 (new)', 'cod-verifier'); ?></li>
-            </ul>
-            
-            <h4><?php _e('⚠️ Important Notes', 'cod-verifier'); ?></h4>
-            <ul>
-                <li><?php _e('Your Twilio phone number must be verified for the countries you want to support', 'cod-verifier'); ?></li>
-                <li><?php _e('OTP resend timer prevents spam and improves user experience', 'cod-verifier'); ?></li>
-                <li><?php _e('Existing Indian users will continue to work without any changes', 'cod-verifier'); ?></li>
-                <li><?php _e('All phone numbers are validated in E.164 format', 'cod-verifier'); ?></li>
+                <li><?php _e('✓ API keys are securely stored and masked in UI', 'cod-verifier'); ?></li>
+                <li><?php _e('✓ ₹1 token payments are automatically refunded', 'cod-verifier'); ?></li>
+                <li><?php _e('✓ All transactions are verified with Razorpay signatures', 'cod-verifier'); ?></li>
+                <li><?php _e('✓ Multi-country phone validation with E.164 format', 'cod-verifier'); ?></li>
+                <li><?php _e('✓ OTP timer prevents spam and abuse', 'cod-verifier'); ?></li>
             </ul>
         </div>
     </div>

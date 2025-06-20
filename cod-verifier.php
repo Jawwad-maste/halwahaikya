@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: COD Verifier for WooCommerce
-Description: Multi-country OTP + Token verification for WooCommerce COD orders with Twilio SMS integration
-Version: 1.2.0
+Description: Multi-country OTP + Token verification for WooCommerce COD orders with Twilio SMS and Razorpay integration
+Version: 1.3.0
 Author: Your Name
 Requires at least: 5.0
 Tested up to: 6.4
@@ -19,7 +19,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('COD_VERIFIER_VERSION', '1.2.0');
+define('COD_VERIFIER_VERSION', '1.3.0');
 define('COD_VERIFIER_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('COD_VERIFIER_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
@@ -125,6 +125,7 @@ class CODVerifier {
                 'testMode' => get_option('cod_verifier_test_mode', '1'),
                 'allowedRegions' => get_option('cod_verifier_allowed_regions', 'india'),
                 'otpTimerDuration' => get_option('cod_verifier_otp_timer_duration', 30),
+                'razorpayMode' => get_option('cod_verifier_razorpay_mode', 'test'),
             ));
         }
     }
@@ -226,6 +227,7 @@ class CODVerifier {
         }
         
         $enable_otp = get_option('cod_verifier_enable_otp', '1');
+        $enable_token = get_option('cod_verifier_enable_token', '1');
         $test_mode = get_option('cod_verifier_test_mode', '1');
         $allowed_regions = get_option('cod_verifier_allowed_regions', 'india');
         
@@ -238,6 +240,19 @@ class CODVerifier {
             if (empty($twilio_sid) || empty($twilio_token) || empty($twilio_number)) {
                 echo '<div class="notice notice-warning"><p>';
                 echo __('COD Verifier: Twilio SMS configuration is incomplete. Please configure your Twilio settings in ', 'cod-verifier');
+                echo '<a href="' . admin_url('admin.php?page=cod-verifier-settings') . '">plugin settings</a>.';
+                echo '</p></div>';
+            }
+        }
+        
+        // Check Razorpay configuration in production mode
+        if ($enable_token === '1' && $test_mode === '0') {
+            $razorpay_key_id = get_option('cod_verifier_razorpay_key_id', '');
+            $razorpay_key_secret = get_option('cod_verifier_razorpay_key_secret', '');
+            
+            if (empty($razorpay_key_id) || empty($razorpay_key_secret)) {
+                echo '<div class="notice notice-warning"><p>';
+                echo __('COD Verifier: Razorpay configuration is incomplete. Please configure your Razorpay settings in ', 'cod-verifier');
                 echo '<a href="' . admin_url('admin.php?page=cod-verifier-settings') . '">plugin settings</a>.';
                 echo '</p></div>';
             }
@@ -283,6 +298,7 @@ class CODVerifier {
         add_option('cod_verifier_twilio_number', '');
         add_option('cod_verifier_razorpay_key_id', '');
         add_option('cod_verifier_razorpay_key_secret', '');
+        add_option('cod_verifier_razorpay_mode', 'test'); // Default to test mode
         
         // Check if Twilio SDK directory exists
         $twilio_sdk_path = COD_VERIFIER_PLUGIN_PATH . 'includes/twilio-sdk/';

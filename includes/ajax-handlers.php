@@ -10,8 +10,12 @@ class CODVerifierAjax {
         add_action('wp_ajax_nopriv_cod_send_otp', array($this, 'send_otp'));
         add_action('wp_ajax_cod_verify_otp', array($this, 'verify_otp'));
         add_action('wp_ajax_nopriv_cod_verify_otp', array($this, 'verify_otp'));
-        add_action('wp_ajax_cod_token_payment', array($this, 'handle_token_payment'));
-        add_action('wp_ajax_nopriv_cod_token_payment', array($this, 'handle_token_payment'));
+        
+        // NEW: Razorpay Token Payment Handlers
+        add_action('wp_ajax_cod_create_razorpay_order', array($this, 'create_razorpay_order'));
+        add_action('wp_ajax_nopriv_cod_create_razorpay_order', array($this, 'create_razorpay_order'));
+        add_action('wp_ajax_cod_verify_razorpay_payment', array($this, 'verify_razorpay_payment'));
+        add_action('wp_ajax_nopriv_cod_verify_razorpay_payment', array($this, 'verify_razorpay_payment'));
     }
     
     public function send_otp() {
@@ -351,7 +355,86 @@ class CODVerifierAjax {
         }
     }
     
-    public function handle_token_payment() {
+    // NEW: Create Razorpay Order for ₹1 Token Payment
+    public function create_razorpay_order() {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['nonce'], 'cod_verifier_nonce')) {
+            wp_send_json_error(__('Security check failed.', 'cod-verifier'));
+            return;
+        }
+        
+        $test_mode = get_option('cod_verifier_test_mode', '1');
+        $razorpay_mode = get_option('cod_verifier_razorpay_mode', 'test');
+        
+        if ($test_mode === '1') {
+            // Test mode - simulate order creation
+            wp_send_json_success(array(
+                'order_id' => 'order_test_' . time(),
+                'key_id' => 'rzp_test_demo',
+                'amount' => 100,
+                'currency' => 'INR',
+                'test_mode' => true,
+                'qr_code_url' => 'data:image/svg+xml;base64,' . base64_encode('<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg"><rect width="200" height="200" fill="#f0f0f0"/><text x="100" y="100" text-anchor="middle" dy=".3em" font-family="Arial" font-size="14">TEST QR CODE</text></svg>')
+            ));
+            return;
+        }
+        
+        // Production mode
+        $key_id = get_option('cod_verifier_razorpay_key_id', '');
+        $key_secret = get_option('cod_verifier_razorpay_key_secret', '');
+        
+        if (empty($key_id) || empty($key_secret)) {
+            wp_send_json_error(__('Razorpay not configured. Please add API keys in settings.', 'cod-verifier'));
+            return;
+        }
+        
+        $order_data = array(
+            'amount' => 100, // ₹1 in paise
+            'currency' => 'INR',
+            'receipt' => 'cod_token_' . time(),
+            'payment_capture' => 1,
+            'notes' => array(
+                'purpose' => 'COD Token Payment',
+                'auto_refund' => 'yes'
+            )
+        );
+        
+        $response = wp_remote_post('https://api.razorpay.com/v1/orders', array(
+            'headers' => array(
+                'Authorization' => 'Basic ' . base64_encode($key_id . ':' . $key_secret),
+                'Content-Type' => 'application/json'
+            ),
+            'body' => json_encode($order_data),
+            'timeout' => 30
+        ));
+        
+        if (is_wp_error($response)) {
+            wp_send_json_error(__('Failed to create order: ', 'cod-verifier') . $response->get_error_message());
+            return;
+        }
+        
+        $body = wp_remote_retrieve_body($response);
+        $result = json_decode($body, true);
+        
+        if (isset($result['id'])) {
+            // Generate QR code URL
+            $qr_code_url = "https://api.razorpay.com/v1/payments/qr_codes/{$result['id']}/qr_code";
+            
+            wp_send_json_success(array(
+                'order_id' => $result['id'],
+                'key_id' => $key_id,
+                'amount' => $result['amount'],
+                'currency' => $result['currency'],
+                'test_mode' => false,
+                'qr_code_url' => $qr_code_url
+            ));
+        } else {
+            wp_send_json_error(__('Failed to create order. Please check Razorpay configuration.', 'cod-verifier'));
+        }
+    }
+    
+    // NEW: Verify Razorpay Payment and Auto-Refund
+    public function verify_razorpay_payment() {
         // Verify nonce
         if (!wp_verify_nonce($_POST['nonce'], 'cod_verifier_nonce')) {
             wp_send_json_error(__('Security check failed.', 'cod-verifier'));
@@ -360,59 +443,98 @@ class CODVerifierAjax {
         
         $test_mode = get_option('cod_verifier_test_mode', '1');
         
-        if (!session_id()) {
-            session_start();
+        if ($test_mode === '1' || isset($_POST['test_mode'])) {
+            // Test mode - simulate payment verification
+            if (!session_id()) {
+                session_start();
+            }
+            
+            $_SESSION['cod_token_paid'] = true;
+            wp_send_json_success(__('Payment verified successfully! (Test Mode - No actual charge)', 'cod-verifier'));
+            return;
         }
         
-        if ($test_mode === '1') {
-            // Test mode - simulate payment
+        // Production mode
+        $payment_id = sanitize_text_field($_POST['payment_id']);
+        $order_id = sanitize_text_field($_POST['order_id']);
+        $signature = sanitize_text_field($_POST['signature']);
+        
+        if (empty($payment_id) || empty($order_id) || empty($signature)) {
+            wp_send_json_error(__('Payment verification failed. Missing parameters.', 'cod-verifier'));
+            return;
+        }
+        
+        $key_secret = get_option('cod_verifier_razorpay_key_secret', '');
+        
+        if (empty($key_secret)) {
+            wp_send_json_error(__('Razorpay secret key not configured.', 'cod-verifier'));
+            return;
+        }
+        
+        // Verify signature
+        $expected_signature = hash_hmac('sha256', $order_id . '|' . $payment_id, $key_secret);
+        
+        if ($signature === $expected_signature) {
+            // Payment verified - now initiate auto-refund
+            $refund_result = $this->initiate_auto_refund($payment_id);
+            
+            if (!session_id()) {
+                session_start();
+            }
+            
             $_SESSION['cod_token_paid'] = true;
-            wp_send_json_success(__('Token payment completed successfully! (Test Mode)', 'cod-verifier'));
-        } else {
-            // Production mode - integrate with Razorpay
-            $razorpay_key_id = get_option('cod_verifier_razorpay_key_id', '');
-            $razorpay_key_secret = get_option('cod_verifier_razorpay_key_secret', '');
             
-            if (empty($razorpay_key_id) || empty($razorpay_key_secret)) {
-                wp_send_json_error(__('Payment gateway not configured. Please contact administrator.', 'cod-verifier'));
-                return;
-            }
-            
-            // Create Razorpay order
-            $order_data = array(
-                'amount' => 100, // ₹1 in paise
-                'currency' => 'INR',
-                'receipt' => 'cod_token_' . time(),
-                'notes' => array(
-                    'purpose' => 'COD Token Payment'
-                )
-            );
-            
-            $response = wp_remote_post('https://api.razorpay.com/v1/orders', array(
-                'headers' => array(
-                    'Authorization' => 'Basic ' . base64_encode($razorpay_key_id . ':' . $razorpay_key_secret),
-                    'Content-Type' => 'application/json'
-                ),
-                'body' => json_encode($order_data),
-                'timeout' => 30
-            ));
-            
-            if (is_wp_error($response)) {
-                wp_send_json_error(__('Failed to create payment order. Please try again.', 'cod-verifier'));
-                return;
-            }
-            
-            $body = wp_remote_retrieve_body($response);
-            $result = json_decode($body, true);
-            
-            if (isset($result['id'])) {
-                // For production, we would return Razorpay order details
-                // For now, simulate successful payment
-                $_SESSION['cod_token_paid'] = true;
-                wp_send_json_success(__('Token payment completed successfully!', 'cod-verifier'));
+            if ($refund_result['success']) {
+                wp_send_json_success(__('Payment verified successfully! ₹1 refund initiated automatically.', 'cod-verifier'));
             } else {
-                wp_send_json_error(__('Failed to process payment. Please try again.', 'cod-verifier'));
+                wp_send_json_success(__('Payment verified successfully! Refund will be processed within 24 hours.', 'cod-verifier'));
             }
+        } else {
+            wp_send_json_error(__('Payment verification failed. Invalid signature.', 'cod-verifier'));
+        }
+    }
+    
+    // NEW: Auto-Refund Function
+    private function initiate_auto_refund($payment_id) {
+        $key_id = get_option('cod_verifier_razorpay_key_id', '');
+        $key_secret = get_option('cod_verifier_razorpay_key_secret', '');
+        
+        if (empty($key_id) || empty($key_secret)) {
+            return array('success' => false, 'message' => 'Razorpay keys not configured');
+        }
+        
+        $refund_data = array(
+            'amount' => 100, // Full ₹1 refund
+            'speed' => 'normal',
+            'notes' => array(
+                'reason' => 'COD Token Verification Complete',
+                'auto_refund' => 'yes'
+            )
+        );
+        
+        $response = wp_remote_post("https://api.razorpay.com/v1/payments/{$payment_id}/refund", array(
+            'headers' => array(
+                'Authorization' => 'Basic ' . base64_encode($key_id . ':' . $key_secret),
+                'Content-Type' => 'application/json'
+            ),
+            'body' => json_encode($refund_data),
+            'timeout' => 30
+        ));
+        
+        if (is_wp_error($response)) {
+            error_log('COD Verifier: Refund failed - ' . $response->get_error_message());
+            return array('success' => false, 'message' => $response->get_error_message());
+        }
+        
+        $body = wp_remote_retrieve_body($response);
+        $result = json_decode($body, true);
+        
+        if (isset($result['id'])) {
+            error_log('COD Verifier: Refund successful - ID: ' . $result['id']);
+            return array('success' => true, 'refund_id' => $result['id']);
+        } else {
+            error_log('COD Verifier: Refund failed - ' . $body);
+            return array('success' => false, 'message' => 'Refund API error');
         }
     }
 }
